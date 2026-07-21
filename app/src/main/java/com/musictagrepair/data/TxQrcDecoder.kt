@@ -63,9 +63,6 @@ object TxQrcDecoder {
     // QRC 固定密钥：!@#)(*$%123ZXC!@!@#)(NHL
     private val QRC_KEY = byteArrayOf(33, 64, 35, 41, 40, 42, 36, 37, 49, 50, 51, 90, 88, 67, 33, 64, 33, 64, 35, 41, 40, 78, 72, 76)
 
-    private typealias DesSchedule = Array<ByteArray>
-    private typealias TripleDesSchedule = Array<DesSchedule>
-
     // 全部以无符号 32 位处理
     private fun bitnum(a: ByteArray, b: Int, c: Int): Int {
         val byteIndex = (b / 32) * 4 + 3 - (b % 32) / 8
@@ -166,7 +163,7 @@ object TxQrcDecoder {
                 bitnum_intr(s0, 23, 2) or
                 bitnum_intr(s1, 31, 1) or
                 bitnum_intr(s0, 31, 0)
-            ) and 0xFF
+            ).toByte()
         out[2] = (
             bitnum_intr(s1, 6, 7) or
                 bitnum_intr(s0, 6, 6) or
@@ -176,7 +173,7 @@ object TxQrcDecoder {
                 bitnum_intr(s0, 22, 2) or
                 bitnum_intr(s1, 30, 1) or
                 bitnum_intr(s0, 30, 0)
-            ) and 0xFF
+            ).toByte()
         out[1] = (
             bitnum_intr(s1, 5, 7) or
                 bitnum_intr(s0, 5, 6) or
@@ -186,7 +183,7 @@ object TxQrcDecoder {
                 bitnum_intr(s0, 21, 2) or
                 bitnum_intr(s1, 29, 1) or
                 bitnum_intr(s0, 29, 0)
-            ) and 0xFF
+            ).toByte()
         out[0] = (
             bitnum_intr(s1, 4, 7) or
                 bitnum_intr(s0, 4, 6) or
@@ -196,7 +193,7 @@ object TxQrcDecoder {
                 bitnum_intr(s0, 20, 2) or
                 bitnum_intr(s1, 28, 1) or
                 bitnum_intr(s0, 28, 0)
-            ) and 0xFF
+            ).toByte()
         out[7] = (
             bitnum_intr(s1, 3, 7) or
                 bitnum_intr(s0, 3, 6) or
@@ -206,7 +203,7 @@ object TxQrcDecoder {
                 bitnum_intr(s0, 19, 2) or
                 bitnum_intr(s1, 27, 1) or
                 bitnum_intr(s0, 27, 0)
-            ) and 0xFF
+            ).toByte()
         out[6] = (
             bitnum_intr(s1, 2, 7) or
                 bitnum_intr(s0, 2, 6) or
@@ -216,7 +213,7 @@ object TxQrcDecoder {
                 bitnum_intr(s0, 18, 2) or
                 bitnum_intr(s1, 26, 1) or
                 bitnum_intr(s0, 26, 0)
-            ) and 0xFF
+            ).toByte()
         out[5] = (
             bitnum_intr(s1, 1, 7) or
                 bitnum_intr(s0, 1, 6) or
@@ -226,7 +223,7 @@ object TxQrcDecoder {
                 bitnum_intr(s0, 17, 2) or
                 bitnum_intr(s1, 25, 1) or
                 bitnum_intr(s0, 25, 0)
-            ) and 0xFF
+            ).toByte()
         out[4] = (
             bitnum_intr(s1, 0, 7) or
                 bitnum_intr(s0, 0, 6) or
@@ -236,7 +233,7 @@ object TxQrcDecoder {
                 bitnum_intr(s0, 16, 2) or
                 bitnum_intr(s1, 24, 1) or
                 bitnum_intr(s0, 24, 0)
-            ) and 0xFF
+            ).toByte()
     }
 
     private fun des_f(state: Int, key: ByteArray): Int {
@@ -326,7 +323,7 @@ object TxQrcDecoder {
             )
     }
 
-    private fun des_crypt(input: ByteArray, schedule: DesSchedule, output: ByteArray) {
+    private fun des_crypt(input: ByteArray, schedule: Array<ByteArray>, output: ByteArray) {
         val ip = initial_permutation(input)
         var s0 = ip[0]
         var s1 = ip[1]
@@ -339,7 +336,7 @@ object TxQrcDecoder {
         inverse_permutation(s0, s1, output)
     }
 
-    private fun key_schedule(key: ByteArray, mode: Int): DesSchedule {
+    private fun key_schedule(key: ByteArray, mode: Int): Array<ByteArray> {
         val schedule = Array(16) { ByteArray(6) }
         var c = 0
         var d = 0
@@ -349,8 +346,8 @@ object TxQrcDecoder {
         }
         for (i in 0 until 16) {
             val shift = key_rnd_shift[i]
-            c = (((c shl shift) or (c ushr (28 - shift))) and 0xFFFFFFF0)
-            d = (((d shl shift) or (d ushr (28 - shift))) and 0xFFFFFFF0)
+            c = (((c shl shift) or (c ushr (28 - shift))) and 0xFFFFFFF0.toInt())
+            d = (((d shl shift) or (d ushr (28 - shift))) and 0xFFFFFFF0.toInt())
             val togen = if (mode == DES_DECRYPT) 15 - i else i
             for (j in 0 until 24) {
                 schedule[togen][j / 8] = (schedule[togen][j / 8].toInt() or bitnum_intr(c, key_compression[j], 7 - (j % 8))).toByte()
@@ -362,7 +359,7 @@ object TxQrcDecoder {
         return schedule
     }
 
-    private fun tripledes_key_setup(key: ByteArray, mode: Int): TripleDesSchedule {
+    private fun tripledes_key_setup(key: ByteArray, mode: Int): Array<Array<ByteArray>> {
         return if (mode == DES_ENCRYPT) {
             arrayOf(
                 key_schedule(key.copyOfRange(0, 8), DES_ENCRYPT),
@@ -378,7 +375,7 @@ object TxQrcDecoder {
         }
     }
 
-    private fun tripledes_crypt(input: ByteArray, schedule: TripleDesSchedule, output: ByteArray) {
+    private fun tripledes_crypt(input: ByteArray, schedule: Array<Array<ByteArray>>, output: ByteArray) {
         val buf = ByteArray(8)
         des_crypt(input, schedule[0], buf)
         des_crypt(buf, schedule[1], output)
