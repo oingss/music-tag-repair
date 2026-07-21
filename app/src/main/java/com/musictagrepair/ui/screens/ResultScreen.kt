@@ -117,7 +117,7 @@ fun ResultScreen(
                     TagRow("专辑", tags.album)
                     TagRow("年份", tags.year?.toString())
                     TagRow("歌词", if (tags.lyrics != null) "✓ 已写入" else null)
-                    TagRow("封面", if (tags.coverData != null) "✓ 已写入" else null)
+                    TagRow("封面", if (tags.hasCover) "✓ 已写入" else null)
                 }
             }
 
