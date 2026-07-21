@@ -121,6 +121,13 @@ data class FileStatus(
 
 /**
  * 在线音乐信息
+ *
+ * [meta] 用于保存各平台后续获取歌词/封面所需的字段：
+ * - wy（网易云）：id 即歌曲 id，直接用于歌词/封面接口
+ * - kg（酷狗）：id 即 hash，直接用于歌词/封面接口
+ * - kw（酷我）：id 即 MUSICRID 去掉前缀的 rid
+ * - mg（咪咕）：id 是 songId；meta 额外存 contentId / copyrightId / lrcUrl / mrcUrl / trcUrl / picUrl
+ * - tx（QQ）：id 是 song mid；meta 额外存 songId（数字 id，用于歌词接口）/ albumMid（用于封面拼 URL）
  */
 data class OnlineMusicInfo(
     val id: String,
@@ -133,4 +140,35 @@ data class OnlineMusicInfo(
     val tlyrics: String? = null,
     val rlyrics: String? = null,
     val sourceId: String,
+    /** 平台额外元数据，键值对形式。详见类注释。 */
+    val meta: Map<String, String> = emptyMap(),
 )
+
+/** 各平台标识。 */
+object MusicSource {
+    const val NETEASE = "wy"
+    const val KUGOU = "kg"
+    const val KUWO = "kw"
+    const val MIGU = "mg"
+    const val QQ = "tx"
+
+    /** 用户可读的中文标签。 */
+    fun label(sourceId: String): String = when (sourceId) {
+        NETEASE -> "网易云"
+        KUGOU -> "酷狗"
+        KUWO -> "酷我"
+        MIGU -> "咪咕"
+        QQ -> "QQ"
+        else -> sourceId
+    }
+
+    /** 用于 UI 标签的配色。返回 ARGB 颜色值。 */
+    fun color(sourceId: String): Long = when (sourceId) {
+        NETEASE -> 0xFFE53935
+        KUGOU -> 0xFF1E88E5
+        KUWO -> 0xFFFFA726
+        MIGU -> 0xFFE91E63
+        QQ -> 0xFF26C6DA
+        else -> 0xFF9E9E9E
+    }
+}
