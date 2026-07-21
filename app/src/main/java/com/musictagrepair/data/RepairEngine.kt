@@ -140,7 +140,7 @@ class RepairEngine(
      *
      * 根据 [OnlineMusicInfo.sourceId] 分发到对应平台：
      * - wy：网易云歌词 + 封面
-     * - kg：酷狗（暂未实现歌词/封面获取，仅用搜索结果元数据）
+     * - kg：酷狗歌词（KRC 解密，候选歌词查询 + 下载）+ 封面（POST get_res_privilege）
      * - kw：酷我歌词 + 封面（需要单独请求 URL）
      * - mg：咪咕歌词（从 meta.mrcUrl/lrcUrl 下载并解密）+ 封面（来自搜索结果 coverUrl）
      * - tx：QQ 歌词（3DES 解密 QRC）+ 封面（来自搜索结果 coverUrl）
@@ -158,6 +158,10 @@ class RepairEngine(
                 MusicSource.NETEASE -> {
                     val lyrics = onlineService.getNeteaseLyrics(info.id)
                     val lyric = lyrics?.get("lyric")
+                    if (!lyric.isNullOrBlank()) tags.lyrics = lyric
+                }
+                MusicSource.KUGOU -> {
+                    val (lyric, _) = onlineService.getKuGouLyrics(info)
                     if (!lyric.isNullOrBlank()) tags.lyrics = lyric
                 }
                 MusicSource.KUWO -> {
@@ -179,7 +183,6 @@ class RepairEngine(
                         tags.lyrics = (tags.lyrics ?: "") + "\n\n[翻译]\n$tlyric"
                     }
                 }
-                // kg 酷狗暂未实现歌词/封面获取
             }
         }.onFailure { Log.w(TAG, "Get lyrics failed (${info.sourceId}): ${it.message}") }
 
@@ -187,6 +190,7 @@ class RepairEngine(
         runCatching {
             val coverUrl = when (info.sourceId) {
                 MusicSource.NETEASE -> info.coverUrl ?: onlineService.getNeteaseCover(info.id)
+                MusicSource.KUGOU -> onlineService.getKuGouCover(info)
                 MusicSource.KUWO -> kuwoService.getCoverUrl(info.id)
                 MusicSource.MIGU -> info.coverUrl ?: info.meta["picUrl"]
                 MusicSource.QQ -> info.coverUrl
