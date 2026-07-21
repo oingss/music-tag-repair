@@ -102,6 +102,11 @@ class AppViewModel(
         }
     }
 
+    /**
+     * 仅解析 SAF tree Uri 为可读路径（用于 UI 展示），不触发扫描。
+     */
+    fun resolveDir(treeUri: Uri): String? = rootPathResolver.resolve(treeUri)
+
     fun scanDirectory(treeUri: Uri) {
         viewModelScope.launch {
             val realPath = rootPathResolver.resolve(treeUri)
@@ -231,12 +236,7 @@ class AppViewModel(
     }
 
     /**
-     * 单文件修复。
-     *
-     * 关键点：
-     * - 启动后立即 `yield()` 让 Compose 把"修复中"状态渲染出来，避免用户感觉"按了没反应"
-     * - fetchFullMetadata 返回的 MusicTags.coverData 是大字节数组，写完文件立即释放（不要让它进 UiState）
-     * - 写完后重新读 tags（readTags 已不再加载 coverData，只设置 hasCover），确保内存不增长
+     * 单文件修复（合并模式）：仅补充缺失字段，已有字段保留。
      */
     fun repair(info: OnlineMusicInfo, onDone: (Boolean) -> Unit) {
         val current = _uiState.value.currentFile ?: run {
@@ -298,6 +298,78 @@ class AppViewModel(
                 onDone(success)
             } catch (e: Throwable) {
                 _uiState.update { it.copy(repairMessage = "修复失败: ${e.message}") }
+                onDone(false)
+            } finally {
+                _uiState.update { it.copy(repairing = false) }
+            }
+        }
+    }
+
+    /**
+     * 单文件替换（覆盖模式）：用搜索结果覆盖现有标签。
+     * 仅保留文件本身的音频属性（duration / bitrate / sampleRate / channels），
+     * 其余元数据（title/artist/album/year/track/genre/lyrics/cover）一律以搜索结果为准。
+     *
+     * 用于完整文件的情况下，用户认为在线搜索到的信息更准确时。
+     */
+    fun repairReplace(info: OnlineMusicInfo, onDone: (Boolean) -> Unit) {
+        val current = _uiState.value.currentFile ?: run {
+            onDone(false); return
+        }
+        viewModelScope.launch {
+            _uiState.update { it.copy(repairing = true, repairMessage = "正在获取元数据...") }
+            kotlinx.coroutines.yield()
+            try {
+                val tags = engine.fetchFullMetadata(info)
+                val existing = current.report.currentTags
+                val replaced = MusicTags(
+                    title = tags.title,
+                    artist = tags.artist,
+                    album = tags.album,
+                    albumArtist = tags.albumArtist,
+                    year = tags.year,
+                    trackNumber = tags.trackNumber,
+                    trackTotal = tags.trackTotal,
+                    discNumber = tags.discNumber,
+                    discTotal = tags.discTotal,
+                    genre = tags.genre,
+                    coverMime = tags.coverMime,
+                    coverData = tags.coverData,
+                    hasCover = tags.hasCover || (tags.coverData?.isNotEmpty() == true),
+                    lyrics = tags.lyrics,
+                    // 这些是文件本身固有属性，搜索结果不提供，保留原值
+                    durationMs = existing.durationMs,
+                    bitrate = existing.bitrate,
+                    sampleRate = existing.sampleRate,
+                    channels = existing.channels,
+                )
+
+                _uiState.update { it.copy(repairMessage = "正在覆盖写入标签...") }
+                kotlinx.coroutines.yield()
+                val success = engine.writeTagsToFile(current.path, replaced)
+
+                replaced.coverData = null
+                tags.coverData = null
+
+                if (success) {
+                    val newTags = TagService.readTags(current.path) ?: replaced.copy(coverData = null)
+                    val newReport = com.musictagrepair.data.CompletenessReport.check(newTags)
+                    val newFile = current.copy(report = newReport)
+                    _uiState.update { ui ->
+                        ui.copy(
+                            files = ui.files.map { if (it.path == current.path) newFile else it },
+                            currentFile = newFile,
+                            repairMessage = "替换成功",
+                        )
+                    }
+                    store.save(_uiState.value.files)
+                } else {
+                    _uiState.update { it.copy(repairMessage = "写入失败") }
+                }
+
+                onDone(success)
+            } catch (e: Throwable) {
+                _uiState.update { it.copy(repairMessage = "替换失败: ${e.message}") }
                 onDone(false)
             } finally {
                 _uiState.update { it.copy(repairing = false) }
