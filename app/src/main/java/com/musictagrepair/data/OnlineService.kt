@@ -47,7 +47,7 @@ class OnlineService(
         /** KRC 加密密钥（16 字节固定），来源于 lx-music-desktop 项目。 */
         private val KRC_ENC_KEY = byteArrayOf(
             0x40, 0x47, 0x61, 0x77, 0x5e, 0x32, 0x74, 0x47,
-            0x51, 0x36, 0x31, 0x2d, 0xce, 0xd2, 0x6e, 0x69,
+            0x51, 0x36, 0x31, 0x2d, 0xce.toByte(), 0xd2.toByte(), 0x6e, 0x69,
         )
 
         private val JSON_MEDIA_TYPE = "application/json; charset=utf-8".toMediaType()
@@ -376,7 +376,7 @@ class OnlineService(
             val s = (sec % 60).toString().padStart(2, '0')
             "[$m:$s.$ms]"
         }
-        text.trim()
+        return text.trim()
     }
 
     /** 把 "mm:ss" 或 "hh:mm:ss" 的时长字符串解析为总秒数。 */
