@@ -105,6 +105,13 @@ fun ScanScreen(
         }
     }
 
+    // 已有保存的文件列表时直接跳文件列表页，不需要重新扫描
+    LaunchedEffect(state.hydrated) {
+        if (state.hydrated && state.files.isNotEmpty() && !state.scanning) {
+            onNavigateToFiles()
+        }
+    }
+
     // 用户从「所有文件访问」系统设置页返回时，重新检测权限状态
     val lifecycleOwner = LocalLifecycleOwner.current
     LaunchedEffect(lifecycleOwner) {
