@@ -24,7 +24,10 @@ object TagService {
     }
 
     /**
-     * 读取文件标签
+     * 读取文件标签。
+     *
+     * **注意**：封面字节 [MusicTags.coverData] 默认不读取（避免大数组污染内存），
+     * 只设置 [MusicTags.hasCover] = true。需要拿封面字节时调 [readCover]。
      */
     fun readTags(filePath: String): MusicTags? {
         return try {
@@ -36,8 +39,6 @@ object TagService {
             val audioHeader = audioFile.audioHeader
 
             val artwork: Artwork? = tag.firstArtwork
-            val coverData = artwork?.binaryData
-            val coverMime = artwork?.mimeType
 
             // 歌词字段（ID3 的 LYRICS/UNSYNCEDLYRICS 等）
             val lyrics = try { tag.getFirst(FieldKey.LYRICS) } catch (_: Throwable) { "" }
@@ -53,8 +54,9 @@ object TagService {
                 discNumber = tag.getFirst(FieldKey.DISC_NO).toIntOrNull(),
                 discTotal = tag.getFirst(FieldKey.DISC_TOTAL).toIntOrNull(),
                 genre = tag.getFirst(FieldKey.GENRE).takeIf { it.isNotBlank() },
-                coverMime = coverMime,
-                coverData = coverData,
+                coverMime = artwork?.mimeType,
+                hasCover = artwork?.binaryData?.isNotEmpty() == true,
+                coverData = null, // 不在常规读取中加载大字节数组
                 lyrics = lyrics.takeIf { it.isNotBlank() && it.length > 10 },
                 durationMs = audioHeader.trackLength * 1000L,
                 bitrate = try { audioHeader.bitRateAsNumber.toInt() } catch (_: Throwable) { 0 },
