@@ -1,5 +1,6 @@
 package com.musictagrepair.ui.screens
 
+import androidx.compose.animation.animateColorAsState
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -32,7 +33,6 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
@@ -59,6 +59,13 @@ import com.musictagrepair.ui.components.MissingFieldsChips
 import com.musictagrepair.ui.components.ScoreIndicator
 import com.musictagrepair.viewmodel.AppViewModel
 
+/** 文件列表筛选模式。 */
+enum class ListFilter(val label: String) {
+    All("全部"),
+    Incomplete("待修复"),
+    Complete("完整"),
+}
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun FileListScreen(
@@ -69,6 +76,7 @@ fun FileListScreen(
     val state by viewModel.uiState.collectAsState()
     val snackbarHostState = remember { SnackbarHostState() }
     var showConfirmDialog by remember { mutableStateOf(false) }
+    var filter by remember { mutableStateOf(ListFilter.All) }
 
     // 批量修复完成后弹出 Snackbar 提示
     LaunchedEffect(state.batchSummary) {
@@ -84,7 +92,7 @@ fun FileListScreen(
                 title = { Text("文件列表") },
                 navigationIcon = {
                     IconButton(onClick = onBack) {
-                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "返回")
+                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "返回扫描页")
                     }
                 },
                 actions = {
@@ -104,10 +112,13 @@ fun FileListScreen(
             Column(modifier = Modifier
                 .fillMaxSize()
                 .padding(padding)) {
-                StatsBar(
+                // 筛选 + 统计栏
+                FilterBar(
                     total = state.totalCount,
                     complete = state.completeCount,
                     incomplete = state.incompleteCount,
+                    currentFilter = filter,
+                    onFilterChange = { filter = it },
                     onRepairAllClick = {
                         if (state.incompleteCount > 0 && !state.batchRepairing) {
                             showConfirmDialog = true
@@ -121,16 +132,44 @@ fun FileListScreen(
                     BatchProgressBar(state)
                 }
 
+                // 当前筛选模式小标题
+                val filteredFiles = when (filter) {
+                    ListFilter.All -> state.files
+                    ListFilter.Incomplete -> state.files.filter { !it.report.isComplete }
+                    ListFilter.Complete -> state.files.filter { it.report.isComplete }
+                }
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp, vertical = 6.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(
+                        "${filter.label} · ${filteredFiles.size} 首",
+                        fontSize = 12.sp,
+                        color = Color.Gray,
+                        fontWeight = FontWeight.Medium,
+                    )
+                    if (filter != ListFilter.All) {
+                        Spacer(Modifier.weight(1f))
+                        TextButton(onClick = { filter = ListFilter.All }) {
+                            Text("返回全部", fontSize = 12.sp)
+                        }
+                    }
+                }
+
+                // 文件列表
                 LazyColumn(
                     modifier = Modifier.fillMaxSize(),
-                    contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 12.dp, vertical = 8.dp),
+                    contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 12.dp, vertical = 4.dp),
                     verticalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
-                    items(state.files) { file ->
+                    items(filteredFiles) { file ->
                         FileTile(
                             file = file,
+                            enabled = !state.batchRepairing,
                             onClick = {
-                                if (!file.report.isComplete && !state.batchRepairing) {
+                                if (!state.batchRepairing) {
                                     viewModel.searchOnline(file)
                                     onNavigateToMatch()
                                 }
@@ -184,48 +223,73 @@ private fun EmptyState(modifier: Modifier = Modifier) {
         Spacer(Modifier.height(12.dp))
         Text("还没有扫描文件", color = Color.Gray)
         Spacer(Modifier.height(4.dp))
-        Text("请先在「扫描」页面选择目录", fontSize = 13.sp, color = Color.Gray)
+        Text("请点击左上角返回扫描页", fontSize = 13.sp, color = Color.Gray)
     }
 }
 
 @Composable
-private fun StatsBar(
+private fun FilterBar(
     total: Int,
     complete: Int,
     incomplete: Int,
+    currentFilter: ListFilter,
+    onFilterChange: (ListFilter) -> Unit,
     onRepairAllClick: () -> Unit,
     batchRepairing: Boolean,
 ) {
-    Row(
+    Column(
         modifier = Modifier
             .fillMaxWidth()
-            .background(MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.3f))
-            .padding(horizontal = 16.dp, vertical = 12.dp),
-        verticalAlignment = Alignment.CenterVertically,
+            .background(MaterialTheme.colorScheme.surface)
+            .padding(horizontal = 12.dp, vertical = 10.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
-        Text("共 $total 首", fontWeight = FontWeight.SemiBold)
-        Spacer(Modifier.size(16.dp))
-        StatBadge("完整", complete, Color(0xFF4CAF50))
-        Spacer(Modifier.size(8.dp))
-        StatBadge("待修复", incomplete, Color(0xFFEF5350))
-        Spacer(Modifier.weight(1f))
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            FilterChip(
+                label = "全部 $total",
+                selected = currentFilter == ListFilter.All,
+                color = MaterialTheme.colorScheme.primary,
+                onClick = { onFilterChange(ListFilter.All) },
+                modifier = Modifier.weight(1f),
+            )
+            FilterChip(
+                label = "待修复 $incomplete",
+                selected = currentFilter == ListFilter.Incomplete,
+                color = Color(0xFFEF5350),
+                onClick = { onFilterChange(ListFilter.Incomplete) },
+                modifier = Modifier.weight(1f),
+            )
+            FilterChip(
+                label = "完整 $complete",
+                selected = currentFilter == ListFilter.Complete,
+                color = Color(0xFF4CAF50),
+                onClick = { onFilterChange(ListFilter.Complete) },
+                modifier = Modifier.weight(1f),
+            )
+        }
+
         if (incomplete > 0) {
-            OutlinedButton(
+            Button(
                 onClick = onRepairAllClick,
                 enabled = !batchRepairing,
-                shape = RoundedCornerShape(20.dp),
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(12.dp),
             ) {
                 if (batchRepairing) {
                     CircularProgressIndicator(
                         modifier = Modifier.size(14.dp),
                         strokeWidth = 2.dp,
+                        color = Color.White,
                     )
-                    Spacer(Modifier.size(6.dp))
-                    Text("修复中", fontSize = 12.sp)
+                    Spacer(Modifier.size(8.dp))
+                    Text("修复中...", fontSize = 13.sp)
                 } else {
                     Icon(Icons.Filled.AutoFixHigh, contentDescription = null, modifier = Modifier.size(16.dp))
-                    Spacer(Modifier.size(6.dp))
-                    Text("一键修复 $incomplete 首", fontSize = 12.sp)
+                    Spacer(Modifier.size(8.dp))
+                    Text("一键修复 $incomplete 首", fontSize = 13.sp)
                 }
             }
         }
@@ -233,18 +297,36 @@ private fun StatsBar(
 }
 
 @Composable
-private fun StatBadge(label: String, value: Int, color: Color) {
+private fun FilterChip(
+    label: String,
+    selected: Boolean,
+    color: Color,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val bgColor by animateColorAsState(
+        targetValue = if (selected) color else color.copy(alpha = 0.08f),
+        label = "bg",
+    )
+    val textColor by animateColorAsState(
+        targetValue = if (selected) Color.White else color,
+        label = "tx",
+    )
     Box(
-        modifier = Modifier
+        modifier = modifier
             .clip(RoundedCornerShape(20.dp))
-            .background(color.copy(alpha = 0.1f))
-            .padding(horizontal = 10.dp, vertical = 4.dp),
+            .background(bgColor)
+            .clickable { onClick() }
+            .padding(vertical = 8.dp, horizontal = 10.dp),
+        contentAlignment = Alignment.Center,
     ) {
         Text(
-            "$label $value",
+            label,
+            color = textColor,
             fontSize = 12.sp,
             fontWeight = FontWeight.SemiBold,
-            color = color,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
         )
     }
 }
@@ -260,7 +342,7 @@ private fun BatchProgressBar(state: com.musictagrepair.viewmodel.UiState) {
             .padding(horizontal = 12.dp, vertical = 4.dp)
             .clip(RoundedCornerShape(12.dp))
             .background(MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.5f))
-            .padding(16.dp),
+            .padding(14.dp),
         verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
@@ -272,7 +354,7 @@ private fun BatchProgressBar(state: com.musictagrepair.viewmodel.UiState) {
             Text(
                 "正在批量修复...",
                 fontWeight = FontWeight.SemiBold,
-                fontSize = 14.sp,
+                fontSize = 13.sp,
             )
             Spacer(Modifier.weight(1f))
             Text(
@@ -287,22 +369,22 @@ private fun BatchProgressBar(state: com.musictagrepair.viewmodel.UiState) {
             modifier = Modifier.fillMaxWidth().height(6.dp),
         )
 
-        Row {
+        Row(verticalAlignment = Alignment.CenterVertically) {
             Text(
                 "${state.batchDone} / ${state.batchTotal}",
                 fontSize = 12.sp,
                 color = Color.Gray,
+                fontWeight = FontWeight.Medium,
             )
-            Spacer(Modifier.weight(1f))
             if (state.batchCurrentFileName.isNotBlank()) {
+                Spacer(Modifier.size(8.dp))
                 Text(
                     state.batchCurrentFileName,
                     fontSize = 11.sp,
                     color = Color.Gray,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier.weight(8f),
-                    textAlign = androidx.compose.ui.text.style.TextAlign.End,
+                    modifier = Modifier.weight(1f),
                 )
             }
         }
@@ -310,14 +392,17 @@ private fun BatchProgressBar(state: com.musictagrepair.viewmodel.UiState) {
 }
 
 @Composable
-private fun FileTile(file: FileStatus, onClick: () -> Unit) {
+private fun FileTile(file: FileStatus, enabled: Boolean, onClick: () -> Unit) {
     val report = file.report
     Card(
         modifier = Modifier
             .fillMaxWidth()
-            .clickable { onClick() },
+            .clickable(enabled = enabled) { onClick() },
         shape = RoundedCornerShape(12.dp),
-        colors = CardDefaults.cardColors(),
+        colors = CardDefaults.cardColors(
+            containerColor = if (enabled) MaterialTheme.colorScheme.surface
+            else MaterialTheme.colorScheme.surface.copy(alpha = 0.5f),
+        ),
     ) {
         Row(
             modifier = Modifier.padding(14.dp),
