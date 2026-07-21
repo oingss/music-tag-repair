@@ -16,11 +16,17 @@ import okhttp3.Request
 import java.util.concurrent.TimeUnit
 
 /**
- * 在线搜索服务（网易云 + 酷狗）
+ * 在线搜索服务（网易云 + 酷狗）。
+ *
+ * [client] 暴露给其他平台服务（[KuwoService] / [MiguService] / [QQMusicService]）复用，
+ * 避免每个平台各自创建 OkHttp 实例（共享连接池更省资源）。
  */
 class OnlineService(
-    private val client: OkHttpClient = defaultClient(),
+    /** 复用的 OkHttp 客户端，对其他平台服务可见。 */
+    val httpClient: OkHttpClient = defaultClient(),
 ) {
+    private val client: OkHttpClient get() = httpClient
+
     companion object {
         private fun defaultClient(): OkHttpClient = OkHttpClient.Builder()
             .connectTimeout(15, TimeUnit.SECONDS)
