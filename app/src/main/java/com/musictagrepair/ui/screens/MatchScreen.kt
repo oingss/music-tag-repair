@@ -323,20 +323,18 @@ private fun ResultItem(info: OnlineMusicInfo, enabled: Boolean, onClick: () -> U
                 Text(it, fontSize = 12.sp, color = Color.LightGray)
             }
             // 源标签
+            val srcColor = Color(com.musictagrepair.data.MusicSource.color(info.sourceId))
             Box(
                 modifier = Modifier
                     .padding(start = 8.dp)
                     .clip(RoundedCornerShape(4.dp))
-                    .background(
-                        if (info.sourceId == "wy") Color(0xFFE53935).copy(alpha = 0.1f)
-                        else Color(0xFF1E88E5).copy(alpha = 0.1f)
-                    )
+                    .background(srcColor.copy(alpha = 0.1f))
                     .padding(horizontal = 6.dp, vertical = 2.dp),
             ) {
                 Text(
-                    if (info.sourceId == "wy") "网易云" else "酷狗",
+                    com.musictagrepair.data.MusicSource.label(info.sourceId),
                     fontSize = 10.sp,
-                    color = if (info.sourceId == "wy") Color(0xFFE53935) else Color(0xFF1E88E5),
+                    color = srcColor,
                     fontWeight = FontWeight.Medium,
                 )
             }
