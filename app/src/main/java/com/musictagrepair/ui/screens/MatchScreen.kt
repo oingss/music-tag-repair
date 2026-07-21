@@ -19,6 +19,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Save
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
@@ -28,10 +29,14 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -53,6 +58,8 @@ fun MatchScreen(
 ) {
     val state by viewModel.uiState.collectAsState()
     val current = state.currentFile
+    // 当前等待用户确认（修复 / 替换）的搜索结果，非 null 时显示选择弹窗
+    var pendingAction by remember { mutableStateOf<OnlineMusicInfo?>(null) }
 
     Scaffold(
         topBar = {
@@ -135,11 +142,7 @@ fun MatchScreen(
                     ResultItem(
                         info = info,
                         enabled = !state.repairing,
-                        onClick = {
-                            viewModel.repair(info) { success ->
-                                if (success) onNavigateToResult()
-                            }
-                        },
+                        onClick = { pendingAction = info },
                     )
                 }
             }
@@ -175,6 +178,75 @@ fun MatchScreen(
                 }
             }
         }
+    }
+
+    // 修复 / 替换选择弹窗
+    pendingAction?.let { info ->
+        val currentFile = state.currentFile
+        val isComplete = currentFile?.report?.isComplete ?: false
+        AlertDialog(
+            onDismissRequest = { pendingAction = null },
+            title = { Text("选择操作") },
+            text = {
+                Column {
+                    Text(
+                        "搜索结果：",
+                        fontSize = 12.sp,
+                        color = Color.Gray,
+                    )
+                    Spacer(Modifier.height(4.dp))
+                    Text(
+                        "${info.name} - ${info.singer.ifBlank { "未知歌手" }}",
+                        fontWeight = FontWeight.SemiBold,
+                        fontSize = 14.sp,
+                    )
+                    if (info.album.isNotBlank()) {
+                        Text(
+                            "专辑：${info.album}",
+                            fontSize = 12.sp,
+                            color = Color.Gray,
+                        )
+                    }
+                    Spacer(Modifier.height(10.dp))
+                    Text(
+                        if (isComplete)
+                            "此文件标签已完整。可选择「修复」（仅补充缺失字段）或「替换」（用搜索结果覆盖现有标签）。"
+                        else
+                            "此文件标签不完整。点击「修复」将用此搜索结果补充缺失字段。",
+                        fontSize = 12.sp,
+                        color = Color.Gray,
+                    )
+                }
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        val i = info
+                        pendingAction = null
+                        viewModel.repair(i) { success ->
+                            if (success) onNavigateToResult()
+                        }
+                    },
+                ) { Text("修复") }
+            },
+            dismissButton = {
+                if (isComplete) {
+                    // 完整文件提供"替换"选项，覆盖现有标签
+                    TextButton(
+                        onClick = {
+                            val i = info
+                            pendingAction = null
+                            viewModel.repairReplace(i) { success ->
+                                if (success) onNavigateToResult()
+                            }
+                        },
+                    ) { Text("替换", color = Color(0xFFEF5350)) }
+                } else {
+                    // 不完整的文件不显示"替换"，只有"取消"
+                    TextButton(onClick = { pendingAction = null }) { Text("取消") }
+                }
+            },
+        )
     }
 }
 
