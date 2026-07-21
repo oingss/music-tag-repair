@@ -5,10 +5,11 @@ import android.content.Intent
 import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Build
-import android.os.Environment
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -22,9 +23,12 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.AutoFixHigh
+import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.FolderOpen
+import androidx.compose.material.icons.filled.GraphicEq
 import androidx.compose.material.icons.filled.LibraryMusic
+import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.WarningAmber
 import androidx.compose.material3.Button
@@ -59,6 +63,9 @@ import com.musictagrepair.viewmodel.AppViewModel
 import com.musictagrepair.viewmodel.PermissionUtil
 import com.musictagrepair.viewmodel.ScanPhase
 
+/** 扫描范围。 */
+enum class ScanScope { All, Dir }
+
 @Composable
 fun ScanScreen(
     viewModel: AppViewModel,
@@ -66,14 +73,16 @@ fun ScanScreen(
 ) {
     val state by viewModel.uiState.collectAsState()
     val context = LocalContext.current
+    var scanScope by remember { mutableStateOf(ScanScope.All) }
+    var selectedDirPath by remember { mutableStateOf<String?>(null) }
     var selectedTreeUri by remember { mutableStateOf<Uri?>(null) }
 
-    // 权限请求（音频读取 + 通知）
+    // 权限请求
     val permissionLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions(),
     ) { _ -> }
 
-    // SAF 目录选择（仅作为可选的"限定目录"扫描入口）
+    // SAF 目录选择
     val dirPicker = rememberLauncherForActivityResult(
         ActivityResultContracts.OpenDocumentTree(),
     ) { uri ->
@@ -84,10 +93,11 @@ fun ScanScreen(
                 context.contentResolver.takePersistableUriPermission(uri, flags)
             } catch (_: Throwable) {}
             selectedTreeUri = uri
+            // 立即解析路径用于显示；解析失败也允许继续（VM 内部会处理）
+            selectedDirPath = viewModel.resolveDir(uri) ?: uri.toString()
         }
     }
 
-    // 申请音频读取权限
     LaunchedEffect(Unit) {
         val perms = mutableListOf<String>()
         if (Build.VERSION.SDK_INT <= Build.VERSION_CODES.S_V2) {
@@ -105,20 +115,10 @@ fun ScanScreen(
         }
     }
 
-    // 已有保存的文件列表时直接跳文件列表页，不需要重新扫描
-    LaunchedEffect(state.hydrated) {
-        if (state.hydrated && state.files.isNotEmpty() && !state.scanning) {
-            onNavigateToFiles()
-        }
-    }
-
-    // 用户从「所有文件访问」系统设置页返回时，重新检测权限状态
     val lifecycleOwner = LocalLifecycleOwner.current
     LaunchedEffect(lifecycleOwner) {
         val observer = LifecycleEventObserver { _, event ->
-            if (event == Lifecycle.Event.ON_RESUME) {
-                viewModel.refreshPermissions()
-            }
+            if (event == Lifecycle.Event.ON_RESUME) viewModel.refreshPermissions()
         }
         lifecycleOwner.lifecycle.addObserver(observer)
     }
@@ -126,42 +126,30 @@ fun ScanScreen(
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .padding(24.dp),
-        verticalArrangement = Arrangement.spacedBy(16.dp),
-        horizontalAlignment = Alignment.CenterHorizontally,
+            .padding(horizontal = 20.dp, vertical = 24.dp),
+        verticalArrangement = Arrangement.spacedBy(14.dp),
     ) {
-        Spacer(Modifier.height(40.dp))
-
-        // 图标
-        Box(
-            modifier = Modifier
-                .size(96.dp)
-                .clip(CircleShape)
-                .background(MaterialTheme.colorScheme.primaryContainer),
-            contentAlignment = Alignment.Center,
-        ) {
-            Icon(
-                Icons.Filled.AutoFixHigh,
-                contentDescription = null,
-                modifier = Modifier.size(48.dp),
-                tint = MaterialTheme.colorScheme.primary,
-            )
+        // 标题
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Box(
+                modifier = Modifier
+                    .size(48.dp)
+                    .clip(CircleShape)
+                    .background(MaterialTheme.colorScheme.primaryContainer),
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(
+                    Icons.Filled.LibraryMusic,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.primary,
+                )
+            }
+            Spacer(Modifier.size(12.dp))
+            Column {
+                Text("音乐标签修复", fontWeight = FontWeight.Bold, fontSize = 20.sp)
+                Text("选择扫描范围并开始", fontSize = 12.sp, color = Color.Gray)
+            }
         }
-
-        Text(
-            "音乐标签修复",
-            style = MaterialTheme.typography.headlineSmall,
-            fontWeight = FontWeight.Bold,
-        )
-
-        Text(
-            "扫描本地音乐，在线补全标签信息",
-            style = MaterialTheme.typography.bodyMedium,
-            color = Color.Gray,
-            textAlign = TextAlign.Center,
-        )
-
-        Spacer(Modifier.height(8.dp))
 
         // All Files Access 未授权提示
         if (!state.allFilesAccessGranted) {
@@ -170,112 +158,179 @@ fun ScanScreen(
             )
         }
 
-        // 选中目录显示
-        selectedTreeUri?.let { uri ->
-            Box(
+        // 扫描范围标题
+        Text(
+            "扫描范围",
+            fontWeight = FontWeight.SemiBold,
+            fontSize = 14.sp,
+            modifier = Modifier.padding(top = 4.dp),
+        )
+
+        // 选项 1：全设备音频
+        ScopeCard(
+            selected = scanScope == ScanScope.All,
+            onClick = {
+                scanScope = ScanScope.All
+                selectedTreeUri = null
+                selectedDirPath = null
+            },
+            icon = Icons.Filled.GraphicEq,
+            title = "全设备音频",
+            subtitle = "通过媒体库扫描本机所有音频文件（推荐）",
+        )
+
+        // 选项 2：特定目录音频
+        ScopeCard(
+            selected = scanScope == ScanScope.Dir,
+            onClick = { scanScope = ScanScope.Dir },
+            icon = Icons.Filled.Folder,
+            title = "特定目录音频",
+            subtitle = selectedDirPath ?: "点击下方按钮选择目录",
+        )
+
+        // 选目录按钮（仅 Dir 模式显示）
+        if (scanScope == ScanScope.Dir) {
+            OutlinedButton(
+                onClick = { dirPicker.launch(null) },
                 modifier = Modifier
                     .fillMaxWidth()
-                    .clip(RoundedCornerShape(12.dp))
-                    .background(MaterialTheme.colorScheme.surfaceVariant)
-                    .padding(12.dp),
+                    .height(46.dp),
+                shape = RoundedCornerShape(12.dp),
             ) {
-                Text(
-                    text = uri.toString(),
-                    maxLines = 2,
-                    overflow = TextOverflow.Ellipsis,
-                    fontSize = 12.sp,
-                )
+                Icon(Icons.Filled.FolderOpen, contentDescription = null, modifier = Modifier.size(18.dp))
+                Spacer(Modifier.size(8.dp))
+                Text(if (selectedDirPath == null) "选择目录" else "更换目录")
             }
         }
 
-        // 扫描进度
-        if (state.scanning) {
-            ScanProgressBar(state)
-        }
+        Spacer(Modifier.size(4.dp))
 
-        // 主扫描按钮：直接扫整台设备
+        // 开始扫描按钮
         Button(
             onClick = {
-                viewModel.scanAllMedia()
-                onNavigateToFiles()
+                when (scanScope) {
+                    ScanScope.All -> viewModel.scanAllMedia()
+                    ScanScope.Dir -> {
+                        val uri = selectedTreeUri
+                        val path = selectedDirPath
+                        if (uri != null) viewModel.scanDirectory(uri)
+                        else if (path != null) viewModel.scanDirectoryPath(path)
+                    }
+                }
             },
             modifier = Modifier
                 .fillMaxWidth()
                 .height(52.dp),
             shape = RoundedCornerShape(14.dp),
-            enabled = !state.scanning,
+            enabled = !state.scanning &&
+                (scanScope == ScanScope.All || selectedTreeUri != null || selectedDirPath != null),
         ) {
-            Icon(Icons.Filled.LibraryMusic, contentDescription = null)
+            Icon(Icons.Filled.Search, contentDescription = null)
             Spacer(Modifier.size(8.dp))
-            Text("扫描全设备音频")
+            Text(if (state.scanning) "扫描中..." else "开始扫描")
         }
 
-        // 可选：选目录后扫描（仅在指定目录下）
-        OutlinedButton(
-            onClick = { dirPicker.launch(null) },
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(48.dp),
-            shape = RoundedCornerShape(14.dp),
-            enabled = !state.scanning,
-        ) {
-            Icon(Icons.Filled.FolderOpen, contentDescription = null)
-            Spacer(Modifier.size(8.dp))
-            Text(if (selectedTreeUri == null) "选择特定目录扫描" else "更换目录")
-        }
-
-        if (selectedTreeUri != null && !state.scanning) {
-            Button(
-                onClick = {
-                    selectedTreeUri?.let {
-                        viewModel.scanDirectory(it)
-                        onNavigateToFiles()
-                    }
-                },
+        // 扫描进度
+        if (state.scanning) {
+            ScanProgressBar(state)
+        } else if (state.scanStatus.isNotBlank() && state.scanPhase == ScanPhase.Done) {
+            Box(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(48.dp),
-                shape = RoundedCornerShape(14.dp),
-                enabled = !state.scanning,
+                    .clip(RoundedCornerShape(10.dp))
+                    .background(Color(0xFFE8F5E9))
+                    .padding(12.dp),
+                contentAlignment = Alignment.Center,
             ) {
-                Icon(Icons.Filled.Search, contentDescription = null)
-                Spacer(Modifier.size(8.dp))
-                Text("在所选目录扫描")
+                Text(
+                    state.scanStatus,
+                    color = Color(0xFF2E7D32),
+                    fontSize = 13.sp,
+                    textAlign = TextAlign.Center,
+                )
             }
         }
 
-        if (state.scanStatus.isNotBlank() && !state.scanning) {
-            Text(
-                state.scanStatus,
-                fontSize = 13.sp,
-                color = Color.Gray,
-                textAlign = TextAlign.Center,
-            )
-        }
+        Spacer(Modifier.weight(1f))
 
-        // 兜底：扫描内置 Music 目录
-        OutlinedButton(
-            onClick = {
-                val path = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_MUSIC).absolutePath
-                viewModel.scanDirectoryPath(path)
-                onNavigateToFiles()
-            },
+        // 进入音乐目录按钮（仅当有结果时可点）
+        Button(
+            onClick = onNavigateToFiles,
             modifier = Modifier
                 .fillMaxWidth()
-                .height(44.dp),
+                .height(52.dp),
             shape = RoundedCornerShape(14.dp),
-            enabled = !state.scanning,
+            enabled = state.files.isNotEmpty() && !state.scanning,
         ) {
-            Text("或扫描内置音乐目录", fontSize = 13.sp)
+            Icon(Icons.Filled.PlayArrow, contentDescription = null)
+            Spacer(Modifier.size(8.dp))
+            Text(
+                if (state.files.isNotEmpty())
+                    "进入音乐目录（${state.files.size} 首）"
+                else
+                    "进入音乐目录",
+            )
         }
+    }
+}
 
-        Spacer(Modifier.height(8.dp))
+@Composable
+private fun ScopeCard(
+    selected: Boolean,
+    onClick: () -> Unit,
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    title: String,
+    subtitle: String,
+) {
+    val borderColor = if (selected) MaterialTheme.colorScheme.primary else Color.LightGray.copy(alpha = 0.5f)
+    val bgColor = if (selected) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.4f)
+    else MaterialTheme.colorScheme.surface
 
-        Text(
-            "支持 MP3 · FLAC · M4A · OGG · WAV · APE 等",
-            fontSize = 11.sp,
-            color = Color.LightGray,
-        )
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(12.dp))
+            .background(bgColor)
+            .border(1.5.dp, borderColor, RoundedCornerShape(12.dp))
+            .clickable { onClick() }
+            .padding(14.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Box(
+            modifier = Modifier
+                .size(36.dp)
+                .clip(CircleShape)
+                .background(
+                    if (selected) MaterialTheme.colorScheme.primary
+                    else Color.LightGray.copy(alpha = 0.3f)
+                ),
+            contentAlignment = Alignment.Center,
+        ) {
+            Icon(
+                icon,
+                contentDescription = null,
+                tint = if (selected) Color.White else Color.Gray,
+                modifier = Modifier.size(20.dp),
+            )
+        }
+        Spacer(Modifier.size(12.dp))
+        Column(modifier = Modifier.weight(1f)) {
+            Text(title, fontWeight = FontWeight.SemiBold, fontSize = 15.sp)
+            Text(
+                subtitle,
+                fontSize = 12.sp,
+                color = Color.Gray,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
+        if (selected) {
+            Icon(
+                Icons.Filled.CheckCircle,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.primary,
+            )
+        }
     }
 }
 
@@ -286,8 +341,8 @@ private fun AllFilesAccessBanner(onClick: () -> Unit) {
             .fillMaxWidth()
             .clip(RoundedCornerShape(12.dp))
             .background(Color(0xFFFFF3E0))
-            .padding(16.dp),
-        verticalArrangement = Arrangement.spacedBy(8.dp),
+            .padding(14.dp),
+        verticalArrangement = Arrangement.spacedBy(6.dp),
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Icon(
@@ -301,12 +356,12 @@ private fun AllFilesAccessBanner(onClick: () -> Unit) {
                 "需要「所有文件访问」权限",
                 fontWeight = FontWeight.SemiBold,
                 color = Color(0xFFE65100),
-                fontSize = 14.sp,
+                fontSize = 13.sp,
             )
         }
         Text(
-            "Android 11+ 上读写音频文件标签需要该权限。否则即使扫描到文件也无法读取 / 修改标签。",
-            fontSize = 12.sp,
+            "Android 11+ 上读写音频标签需要该权限，否则扫描到文件也无法读取 / 修改标签。",
+            fontSize = 11.sp,
             color = Color(0xFF6D4C41),
         )
         OutlinedButton(
@@ -314,7 +369,7 @@ private fun AllFilesAccessBanner(onClick: () -> Unit) {
             modifier = Modifier.fillMaxWidth(),
             shape = RoundedCornerShape(10.dp),
         ) {
-            Text("前往系统设置授权")
+            Text("前往系统设置授权", fontSize = 13.sp)
         }
     }
 }
@@ -326,12 +381,12 @@ private fun ScanProgressBar(state: com.musictagrepair.viewmodel.UiState) {
             .fillMaxWidth()
             .clip(RoundedCornerShape(12.dp))
             .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
-            .padding(16.dp),
+            .padding(14.dp),
         verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             CircularProgressIndicator(
-                modifier = Modifier.size(18.dp),
+                modifier = Modifier.size(16.dp),
                 strokeWidth = 2.dp,
             )
             Spacer(Modifier.size(8.dp))
@@ -342,7 +397,7 @@ private fun ScanProgressBar(state: com.musictagrepair.viewmodel.UiState) {
                     else -> "扫描中..."
                 },
                 fontWeight = FontWeight.SemiBold,
-                fontSize = 14.sp,
+                fontSize = 13.sp,
             )
         }
 
