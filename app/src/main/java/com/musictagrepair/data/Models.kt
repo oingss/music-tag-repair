@@ -1,7 +1,10 @@
 package com.musictagrepair.data
 
 /**
- * 音乐标签数据
+ * 音乐标签数据。
+ *
+ * **注意**：[coverData] 是大字节数组（数百 KB ~ 数 MB），不应进入 UI State。
+ * 列表扫描 / 批量修复时只关心 [hasCover]，写封面时才通过 [TagService.writeCover] 单独写入。
  */
 data class MusicTags(
     var title: String? = null,
@@ -14,7 +17,10 @@ data class MusicTags(
     var discNumber: Int? = null,
     var discTotal: Int? = null,
     var genre: String? = null,
+    /** 是否含封面。避免在 StateFlow 里持有大字节数组。 */
+    var hasCover: Boolean = false,
     var coverMime: String? = null,
+    /** 仅在写入文件路径上临时使用，**不要**把此字段放到 UiState 里。 */
     var coverData: ByteArray? = null,
     var lyrics: String? = null,
     var durationMs: Long = 0L,
@@ -78,7 +84,8 @@ data class CompletenessReport(
             val hasAlbum = !tags.album.isNullOrBlank()
             if (!hasAlbum) missing.add(MissingField.ALBUM)
 
-            val hasCover = tags.coverData?.isNotEmpty() == true
+            // 优先使用 hasCover 标记；兼容老路径下还残留 coverData 的情况
+            val hasCover = tags.hasCover || (tags.coverData?.isNotEmpty() == true)
             if (!hasCover) missing.add(MissingField.COVER)
 
             val lyricsText = tags.lyrics
